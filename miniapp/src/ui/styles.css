@@ -62,10 +62,11 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
 .empty { padding: 18px 14px; font-size: 15px; font-style: italic; color: var(--graphite); line-height: 1.4; border: 1.5px dashed rgba(138, 106, 74, 0.35); border-radius: 12px; }
 .disc-card, .toast-card { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 12px 9px 9px; border: 1px solid rgba(138, 106, 74, 0.2); border-radius: 12px; background: #fffaf0; text-align: left; box-shadow: 0 3px 10px rgba(80, 55, 25, 0.08); transition: transform 0.2s, box-shadow 0.3s; }
 .disc-card:active { transform: scale(0.98); }
-.disc-row { display: flex; align-items: center; gap: 6px; }
-.disc-row .disc-card { flex: 1; min-width: 0; }
-.dc-del { flex: none; min-width: 36px; height: 36px; padding: 0 10px; border: 1px solid rgba(138, 106, 74, 0.25); border-radius: 18px; background: transparent; color: var(--graphite); font: 15px var(--serif); transition: background 0.2s, color 0.2s, min-width 0.2s; }
-.dc-del.confirm { min-width: 72px; border-color: transparent; background: var(--coral-deep); color: #fff; font-weight: 600; }
+.disc-row { position: relative; border-radius: 12px; overflow: hidden; touch-action: pan-y; transition: max-height 0.22s, opacity 0.22s; max-height: 200px; }
+.disc-row.leaving { max-height: 0; opacity: 0; }
+.dc-slide { position: relative; z-index: 1; will-change: transform; }
+.disc-row .disc-card.hl { box-shadow: inset 0 0 0 2px var(--peach); }
+.dc-del { position: absolute; top: 0; right: 0; bottom: 0; border: 0; border-radius: 12px; background: var(--coral-deep); color: #fff; font: 600 16px var(--serif); text-align: right; padding: 0 18px; }
 .disc-card.hl { box-shadow: 0 0 0 2px var(--peach), 0 6px 16px rgba(201, 106, 90, 0.2); animation: hl 1.4s ease-in-out 2; }
 @keyframes hl { 50% { transform: translateX(4px); } }
 .thumb { width: 56px; height: 56px; border-radius: 8px; flex: none; background: #efe6d4; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }

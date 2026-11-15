@@ -42,7 +42,7 @@ const MAX_DISCOVERIES = 40;
 export async function livingPagesBackground(session: LpSession, cfg: BackgroundConfig) {
   const server = cfg.server.replace(/\/$/, '');
   const settings: Settings = { ...DEFAULT_SETTINGS };
-  const status: GlassesStatus = { connected: false, hasCamera: false, scanning: true, lastCaptureAt: null, lastResult: 'starting', error: null, capture: null };
+  const status: GlassesStatus = { connected: false, hasCamera: false, scanning: false, lastCaptureAt: null, lastResult: 'starting', error: null, capture: null };
   const captureMs: number[] = [];
   let discoveries: Discovery[] = [];
   let pending: Discovery[] = []; // found while the UI was closed

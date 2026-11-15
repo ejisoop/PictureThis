@@ -29,8 +29,8 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useHistoryState('settings', false);
   const [toast, setToast] = useState<Toast>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
-  /** discovery whose delete button was tapped once (a second tap deletes it) */
-  const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  /** the discovery row currently swiped open to show its Delete button */
+  const [swiped, setSwiped] = useState<string | null>(null);
   const [rawPhoto, setRawPhoto] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(true);
   const [view, setView] = useState<ExploreView | null>(null);
@@ -94,14 +94,8 @@ export function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!confirmDel) return;
-    const t = setTimeout(() => setConfirmDel(null), 3000);
-    return () => clearTimeout(t);
-  }, [confirmDel]);
   const forget = (d: Discovery) => {
-    if (confirmDel !== d.id) return setConfirmDel(d.id);
-    setConfirmDel(null);
+    setSwiped(null);
     setDets((ds) => ds.filter((x) => x.id !== d.id));
     setToast((t) => (t?.d.id === d.id ? null : t));
     if (highlight === d.id) setHighlight(null);
@@ -199,8 +193,8 @@ export function App() {
           <div className="disc-list">
             {dets.length === 0 && <div className="empty">Nothing yet. When your glasses spot a figure I can bring to life, it’ll appear here.</div>}
             {dets.map((d) => (
-              <div key={d.id} className="disc-row">
-                <button className={`disc-card ${highlight === d.id ? 'hl' : ''}`} onClick={() => open(d)}>
+              <SwipeRow key={d.id} open={swiped === d.id} onOpenChange={(o) => setSwiped(o ? d.id : null)} onDelete={() => forget(d)} label={d.title}>
+                <button className={`disc-card ${highlight === d.id ? 'hl' : ''}`} onClick={() => (swiped ? setSwiped(null) : open(d))}>
                   <img className="thumb" src={d.thumb} alt="" />
                   <span className="dc-body">
                     <b>{d.title}</b>
@@ -208,10 +202,7 @@ export function App() {
                   </span>
                   <span className="dc-go">›</span>
                 </button>
-                <button className={`dc-del ${confirmDel === d.id ? 'confirm' : ''}`} onClick={() => forget(d)} aria-label={confirmDel === d.id ? `Confirm delete ${d.title}` : `Delete ${d.title}`}>
-                  {confirmDel === d.id ? 'Delete' : '✕'}
-                </button>
-              </div>
+              </SwipeRow>
             ))}
           </div>
           <div className="home-foot">
@@ -219,7 +210,6 @@ export function App() {
             <button className="ghost-btn" onClick={() => setSettingsOpen(true)}>⚙ Settings</button>
           </div>
           {settings?.showPipeline && <PipelineStrip traces={traces} />}
-          <p className="privacy">Photos go to the PictureThis server to be read, then are discarded. Only the pages you discover are kept, so you can reopen them.</p>
         </section>
 
         {/* explore --------------------------------------------------------------- */}
@@ -354,6 +344,67 @@ export function App() {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Swipe left to delete. A short swipe snaps open to reveal a Delete button;
+ * a long swipe (past half the row) deletes straight away. Vertical drags are
+ * left to the list's scroll.
+ */
+const REVEAL = 88;
+function SwipeRow({ open, onOpenChange, onDelete, label, children }: { open: boolean; onOpenChange: (o: boolean) => void; onDelete: () => void; label: string; children: React.ReactNode }) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [dx, setDx] = useState<number | null>(null); // live offset while dragging
+  const [leaving, setLeaving] = useState(false);
+  const g = useRef<{ id: number; x: number; y: number; base: number; mode: 'undecided' | 'swipe' | 'scroll' } | null>(null);
+  const suppressClick = useRef(false);
+  const width = () => rowRef.current?.getBoundingClientRect().width ?? 320;
+  const remove = () => {
+    setLeaving(true);
+    setDx(-width());
+    setTimeout(onDelete, 220);
+  };
+  const onDown = (e: React.PointerEvent) => {
+    if (leaving || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    g.current = { id: e.pointerId, x: e.clientX, y: e.clientY, base: open ? -REVEAL : 0, mode: 'undecided' };
+  };
+  const onMove = (e: React.PointerEvent) => {
+    const s = g.current;
+    if (!s || s.id !== e.pointerId) return;
+    const mx = e.clientX - s.x, my = e.clientY - s.y;
+    if (s.mode === 'undecided') {
+      if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+      s.mode = Math.abs(mx) > Math.abs(my) ? 'swipe' : 'scroll';
+      if (s.mode === 'swipe') rowRef.current?.setPointerCapture(e.pointerId);
+    }
+    if (s.mode !== 'swipe') return;
+    // rubber-band past the right edge
+    const x = s.base + mx;
+    setDx(x > 0 ? x * 0.2 : x);
+  };
+  const onUp = (e: React.PointerEvent) => {
+    const s = g.current;
+    if (!s || s.id !== e.pointerId) return;
+    g.current = null;
+    if (s.mode !== 'swipe') return;
+    suppressClick.current = true;
+    setTimeout(() => (suppressClick.current = false), 0);
+    const x = dx ?? s.base;
+    setDx(null);
+    if (x < -width() * 0.5) remove();
+    else onOpenChange(x < -REVEAL / 2);
+  };
+  const x = dx ?? (open ? -REVEAL : 0);
+  return (
+    <div className={`disc-row ${leaving ? 'leaving' : ''}`} ref={rowRef} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onClickCapture={(e) => suppressClick.current && (e.stopPropagation(), e.preventDefault())}>
+      <button className="dc-del" style={{ width: Math.max(REVEAL, -x), visibility: x < 0 ? 'visible' : 'hidden' }} onClick={remove} tabIndex={open ? 0 : -1} aria-label={`Delete ${label}`}>
+        Delete
+      </button>
+      <div className="dc-slide" style={{ transform: `translateX(${x}px)`, transition: dx === null ? 'transform 0.25s cubic-bezier(.2,.9,.3,1)' : 'none' }}>
+        {children}
       </div>
     </div>
   );
