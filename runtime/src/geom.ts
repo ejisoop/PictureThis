@@ -85,3 +85,33 @@ export function isValidQuad(q: unknown): q is Quad {
   }
   return true;
 }
+
+/**
+ * Is this a believable page outline for someone reading? Gemini sometimes
+ * returns a tiny or wildly skewed quad (or swaps x/y); flattening through it
+ * stretches the photo absurdly. Normalised photo coordinates.
+ */
+export function plausiblePageQuad(q: Quad, o: { minArea?: number; minAngle?: number; maxAngle?: number; maxSideRatio?: number } = {}) {
+  if (!isValidQuad(q)) return false;
+  const minArea = o.minArea ?? 0.2, minA = o.minAngle ?? 55, maxA = o.maxAngle ?? 125, maxR = o.maxSideRatio ?? 1.8;
+  // signed area > 0 ⇔ tl, tr, br, bl run clockwise on screen (y down); negative = mirrored / x-y swapped
+  const signed = q.reduce((s, p, i) => { const n = q[(i + 1) % 4]; return s + p[0] * n[1] - n[0] * p[1]; }, 0) / 2;
+  if (signed < minArea) return false;
+  for (let i = 0; i < 4; i++) {
+    const p = q[i], a = q[(i + 3) % 4], b = q[(i + 1) % 4];
+    const v1 = [a[0] - p[0], a[1] - p[1]], v2 = [b[0] - p[0], b[1] - p[1]];
+    const ang = (Math.acos(Math.max(-1, Math.min(1, (v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(v1[0], v1[1]) * Math.hypot(v2[0], v2[1]))))) * 180) / Math.PI;
+    if (ang < minA || ang > maxA) return false;
+  }
+  const d = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const ratio = (x: number, y: number) => Math.max(x, y) / Math.max(1e-6, Math.min(x, y));
+  return ratio(d(q[0], q[1]), d(q[3], q[2])) <= maxR && ratio(d(q[0], q[3]), d(q[1], q[2])) <= maxR;
+}
+
+/** Gemini's corners if believable, else the same with x/y swapped, else the whole photo. */
+export function sanePageQuad(q: Quad): { quad: Quad; fixed: 'ok' | 'swapped' | 'full-frame' } {
+  if (plausiblePageQuad(q)) return { quad: q, fixed: 'ok' };
+  const swapped = q.map(([x, y]) => [y, x]) as Quad;
+  if (plausiblePageQuad(swapped)) return { quad: swapped, fixed: 'swapped' };
+  return { quad: FULL_QUAD, fixed: 'full-frame' };
+}

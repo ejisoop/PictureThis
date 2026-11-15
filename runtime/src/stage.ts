@@ -9,7 +9,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 // @ts-ignore — v1 JS
 import { lineMaterials } from './sketch.js';
-import { squareToQuad, quadAspect, type Quad } from './geom';
+import { squareToQuad, quadAspect, plausiblePageQuad, FULL_QUAD, type Quad } from './geom';
 import type { NormBox } from './protocol';
 
 export const PAGE_H = 2.8;
@@ -271,6 +271,9 @@ export class Stage {
   /** load the photo: flatten with the page corners, figure rect in page coords */
   load(photo: ImageBitmap | null, corners: Quad, figure: NormBox) {
     this.clearViz();
+    // older discoveries may carry an implausible outline: show the photo unwarped instead of stretched
+    // (relaxed limits: stored corners are relative to the page crop, so they cover most of the image)
+    if (!plausiblePageQuad(corners, { minArea: 0.15 })) corners = FULL_QUAD;
     this.figure = figure;
     const m = this.page.material as THREE.MeshLambertMaterial;
     if (photo) {

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { env } from './env';
 import { generateJson } from './gemini';
 import { PageUnderstanding, type Box } from './types';
-import { squareToQuad, isValidQuad, type Quad, type Mat3 } from '@lp/runtime/host';
+import { squareToQuad, isValidQuad, sanePageQuad, type Quad, type Mat3 } from '@lp/runtime/host';
 import { KNOWN_CONCEPTS } from './examples';
 
 const box2d = { type: 'array', items: { type: 'integer' }, minItems: 4, maxItems: 4, description: '[ymin, xmin, ymax, xmax] in the photo, each 0–1000' };
@@ -197,6 +197,10 @@ export async function understand(buf: Buffer, o: { thinking?: typeof env.visionT
 export function normalise(d: any): { page: PageUnderstanding; pageKey: string } {
   let corners = (Array.isArray(d.pageCorners) ? d.pageCorners : []).map((p: number[]) => [clamp01((p?.[1] ?? 0) / 1000), clamp01((p?.[0] ?? 0) / 1000)]) as Quad;
   if (!isValidQuad(corners)) corners = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  // a tiny or wildly skewed outline would stretch the flattened page absurdly
+  const sane = sanePageQuad(corners);
+  if (sane.fixed !== 'ok') console.warn(`page corners rejected (${JSON.stringify(corners.map((p) => p.map((v) => +v.toFixed(2))))}) → ${sane.fixed}`);
+  corners = sane.quad;
   const toPage = inv3(squareToQuad(corners));
   const regions = (d.regions ?? []).slice(0, 40).flatMap((r: any) => {
     if (!Array.isArray(r?.box_2d) || r.box_2d.length !== 4) return [];
