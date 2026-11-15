@@ -58,11 +58,11 @@ export const UNDERSTAND_SCHEMA = {
             enum: [...KNOWN_CONCEPTS, 'none'],
             description: 'a ready-made model, only if the drawing depicts exactly that system (same objects and setup, e.g. a pendulum hanging from a pivot for simple-pendulum). Otherwise "none".',
           },
-          subject: { type: 'string', enum: ['physics', 'calculus', 'mathematics', 'chemistry', 'biology', 'engineering', 'other'] },
+          subject: { type: 'string', enum: ['physics', 'calculus', 'mathematics', 'chemistry', 'biology', 'engineering', 'computer-science', 'linguistics', 'other'] },
           visualizable: {
             type: 'number',
             description:
-              '0–1: how feasible a live interactive 3d model from THIS figure (a physical system, field, motion, geometry, data structure or function surface that moves or can be manipulated scores high; photos, tables, flowcharts, decorative art and plain text score low)',
+              '0–1: how well THIS figure could be brought to life as an animated or interactive model. Be generous: most diagrams, graphs and plots show something that can move, evolve over time, be traced, respond to a parameter, be explored in 3D, or be built up step by step (physical systems, fields, motion, geometry, functions, curves and solutions of equations; trees, hierarchies, networks and data structures; processes, cycles and derivations, e.g. a parse tree assembling from the words of a sentence). This applies to any subject, not only science. Score low only when there is nothing to animate, build up or explore: photographs, tables, decorative art, plain text.',
           },
           why: { type: 'string', description: 'one sentence justifying the score' },
           parameters: {
@@ -95,7 +95,7 @@ Read the page that the student is looking at and return the JSON described by th
 - Coordinates: every box is [ymin, xmin, ymax, xmax] and every point is [y, x], normalised to 0–1000 over the whole photo.
 - pageCorners: the four corners of the physical page (or the page area of a screenshot). If an edge is cut off by the photo frame, use the frame edge.
 - Figures: include every drawing, diagram, graph or plot. The box must be tight around the drawing, excluding its caption.
-- Be strict with "visualizable": ≥ 0.60 only if a moving, manipulable 3D model would clearly teach the figure's idea better than the printed drawing.
+- Be generous with "visualizable": if a figure shows something that could move, change with a parameter, unfold over time or be explored from another angle, be built up step by step (trees, hierarchies, processes, derivations) or be explored from another angle, score it ≥ ${env.visualizableThreshold.toFixed(2)}, in any subject, even when the drawing is flat and 2D.
 - Extract numeric parameters with units exactly as printed. Do not invent values.
 - Keep text fields short. Summarise body text in a few words; never transcribe paragraphs. Speed matters: the student is waiting.`;
 
@@ -277,7 +277,7 @@ Find the page the student is reading and its figures, and score each figure. Ret
 - Coordinates: boxes are [ymin, xmin, ymax, xmax], points are [y, x], normalised 0–1000 over the whole photo.
 - pageCorners: the corners of the page itself (use the photo edge where the page is cut off).
 - Figure boxes: tight around the drawing, excluding the caption.
-- "visualizable" ≥ 0.75 only if a moving, manipulable 3D model would clearly teach the figure's idea better than the printed drawing.`;
+- Be generous with "visualizable": if a figure shows something that could move, change with a parameter, unfold over time or be explored from another angle, be built up step by step (trees, hierarchies, processes, derivations) or be explored from another angle, score it ≥ ${env.visualizableThreshold.toFixed(2)}, in any subject, even when the drawing is flat and 2D. Score low only when there is nothing to animate or explore.`;
 
 export const DETAILS_SCHEMA = {
   type: 'object',

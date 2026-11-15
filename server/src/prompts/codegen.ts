@@ -23,7 +23,7 @@ You write ONE JavaScript module against the Sketchbook runtime below. The runtim
 ${API}
 
 ## How to approach a figure
-1. Identify the physical or mathematical system in the figure and its governing equations. Prefer the equations printed on the page.
+1. Identify what the figure shows: a physical or mathematical system (use its governing equations, preferring those printed on the page), or a structure or process (a tree, hierarchy, network, cycle or derivation), which usually comes alive by being built up step by step in the order that explains it.
 2. Decide between a side view (\`lp.choreo.popUp\`, authored standing up) and a top view (\`lp.choreo.riseFromPage\`, authored in page space). Match the printed drawing's layout, so the model sits right over it.
 3. Pick one quantity the student should play with, and build 2–5 controls around it. Add one direct-manipulation drag when it makes sense.
 4. Label the important quantities with handwritten notes. Put the key equations, with live values, in the margin (\`kind: 'equation'\`).

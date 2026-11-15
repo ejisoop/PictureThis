@@ -12,7 +12,7 @@ import { chimeDataUrl } from './chime';
 export interface LpSession {
   capabilities: { [k: string]: unknown } | null;
   camera: {
-    takePhoto(o: { size?: 'low' | 'medium' | 'high' | 'max'; compress?: 'none' | 'low' | 'medium' | 'high'; sound?: boolean; timeoutMs?: number }): Promise<{ photoUrl: string; mimeType: string; size: number; requestId: string }>;
+    takePhoto(o: { size?: 'low' | 'medium' | 'high' | 'max'; compress?: 'none' | 'low' | 'medium' | 'high'; sound?: boolean; timeoutMs?: number; mode?: 'photo' | 'text'; transferMethod?: 'auto' | 'direct' | 'ble' }): Promise<{ photoUrl: string; mimeType: string; size: number; requestId: string }>;
   };
   input: { onButtonPress(h: (d: { buttonId: string; pressType: 'short' | 'long' }) => void): () => void };
   speaker: { play(o: { audioUrl: string; volume?: number; stopOtherAudio?: boolean }): Promise<void>; speak(text: string, o?: { stopOtherAudio?: boolean }): Promise<unknown> };
@@ -127,6 +127,21 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
   // ---- capture loop ----------------------------------------------------------------------
   /** extra wait after camera failures, so we don't pile requests onto a busy camera/BLE link */
   let backoffMs = 0;
+  /**
+   * Photo delivery. 'auto' lets the glasses upload over Wi-Fi (falling back to
+   * BLE). When that times out (the Mentra App gives up after ~30 s with
+   * POLL_FAILED), switch to text mode over BLE: smaller, optimised for readable
+   * pages, relayed through the phone. Try the fast path again after a while.
+   */
+  const DELIVERY = {
+    auto: { size: 'medium', compress: 'medium' },
+    text: { size: 'medium', compress: 'high', mode: 'text', transferMethod: 'ble' },
+  } as const;
+  let delivery: keyof typeof DELIVERY = 'auto';
+  let deliveryOkCount = 0;
+  let captureCount = 0;
+  const logCapture = (stage: string, ms: number, detail: string) =>
+    void fetch(`${server}/v1/log`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, stage, ms, detail }) }).catch(() => {});
   function schedule() {
     if (timer) clearTimeout(timer);
     timer = setTimeout(tick, settings.scanIntervalMs + backoffMs);
@@ -156,12 +171,13 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
       return;
     }
     busy = true;
+    const used = delivery; // the delivery path this attempt uses
     const trace: FrameTrace = { id: crypto.randomUUID().slice(0, 8), reason, startedAt: Date.now(), timings: {}, status: 'capturing' };
     try {
       const t0 = Date.now();
       // resolves after the photo has been uploaded; we only ever forward the URL
       // 45 s: without Wi-Fi the glasses relay the photo over BLE, which is slow
-      const photo = await session.camera.takePhoto({ size: 'medium', compress: 'medium', sound: false, timeoutMs: 45000 });
+      const photo = await session.camera.takePhoto({ ...DELIVERY[delivery], sound: false, timeoutMs: 45000 });
       trace.timings.capture = Date.now() - t0;
       captureMs.push(trace.timings.capture);
       if (captureMs.length > 20) captureMs.shift();
@@ -170,6 +186,14 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
       trace.photoUrl = photo.photoUrl;
       status.lastCaptureAt = Date.now();
       backoffMs = 0;
+      captureCount++;
+      // log the first capture, every 10th, and every one in fallback mode (so delivery speed is visible on the server)
+      if (captureCount === 1 || captureCount % 10 === 0 || used !== 'auto') logCapture('capture', trace.timings.capture, `ok via ${used} (${photo.size} bytes)`);
+      // after a run of good BLE captures, try the faster path again
+      if (delivery !== 'auto' && ++deliveryOkCount >= 15) {
+        delivery = 'auto';
+        deliveryOkCount = 0;
+      }
       status.error = null;
       const t1 = Date.now();
       const res = await fetch(`${server}/v1/frames`, {
@@ -188,16 +212,21 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
       const code = e?.code ?? '';
       // busy: the previous photo is still transferring; timeouts: slow link (BLE) — wait longer each time, up to 30 s
       backoffMs = /BUSY/.test(code) ? Math.max(backoffMs, 4000) : Math.min(30000, Math.max(5000, backoffMs * 2));
+      if (/POLL_FAILED|TIMEOUT/.test(code) && delivery === 'auto') {
+        delivery = 'text';
+        deliveryOkCount = 0;
+        backoffMs = 3000; // the next attempt uses the other path; no need to wait long
+      }
       trace.status = 'error';
       trace.detail = `${code} ${e?.message ?? (typeof e === 'object' ? JSON.stringify(e) : e)}`.trim().slice(0, 300);
       // report to the server log so failures on real glasses are visible there
-      void fetch(`${server}/v1/log`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, stage: 'capture-FAIL', ms: Date.now() - trace.startedAt, detail: trace.detail }) }).catch(() => {});
+      logCapture('capture-FAIL', Date.now() - trace.startedAt, `${trace.detail} (via ${used}${used !== delivery ? `; next attempt via ${delivery}` : ''})`);
       if (code === 'PERMISSION_NOT_DECLARED' || code === 'PERMISSION_DENIED') {
         status.scanning = false;
         status.error = 'Camera permission is missing';
       } else if (code === 'NOT_CONNECTED') status.lastResult = 'glasses disconnected';
       else if (/BUSY/.test(code)) status.lastResult = 'camera busy, waiting…';
-      else if (/TIMEOUT|POLL_FAILED/.test(code)) status.lastResult = `photo transfer timed out; retrying in ${Math.round((settings.scanIntervalMs + backoffMs) / 1000)} s (are the glasses on Wi-Fi?)`;
+      else if (/TIMEOUT|POLL_FAILED/.test(code)) status.lastResult = delivery === 'text' ? 'photo upload timed out; switching to Bluetooth text mode' : `photo transfer timed out; retrying in ${Math.round((settings.scanIntervalMs + backoffMs) / 1000)} s`;
       else status.lastResult = `couldn’t take a photo (${code || 'error'}: ${String(e?.message ?? '').slice(0, 80)})`;
     } finally {
       busy = false;
