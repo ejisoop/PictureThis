@@ -122,6 +122,8 @@ export async function smokeTest(
       );
       for (const e of ex.errors) errors.push(`while exercising controls/drags: ${e}`);
       if (ex.nanObjects.length) errors.push(`NaN after exercising controls/drags in: ${ex.nanObjects.join(', ')}`);
+      if (ex.escaped?.length)
+        errors.push(`objects flew off the figure (simulated at 24 fps): ${ex.escaped.join('; ')}. Keep every moving object bounded: integrate dynamics with lp.ode (RK4) rather than hand-rolled Euler steps, and clamp or reset positions so they stay within the figure for every combination of slider values.`);
       exercised = ex.steps;
     }
     return { ok: !!report && errors.length === 0, errors: [...new Set(errors)], report, screenshot, exercised, ms: performance.now() - t0 };

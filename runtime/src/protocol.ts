@@ -82,4 +82,4 @@ export type SandboxToHost =
   | { type: 'stats'; stats: FrameStats }
   | { type: 'error'; phase: 'create' | 'enter' | 'exit' | 'update' | 'runtime' | 'control'; message: string; stack?: string }
   | { type: 'test-report'; report: TestReport }
-  | { type: 'exercise-report'; errors: string[]; nanObjects: string[]; steps: number };
+  | { type: 'exercise-report'; errors: string[]; nanObjects: string[]; escaped?: string[]; steps: number };

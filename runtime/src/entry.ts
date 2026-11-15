@@ -166,13 +166,35 @@ function findNaN() {
   return [...new Set(nan)].slice(0, 20);
 }
 
+/** visible meshes that have flown far off the figure (a runaway simulation) */
+function findEscaped(): string[] {
+  const out: string[] = [];
+  const root = internals?.root;
+  if (!root) return out;
+  root.updateMatrixWorld(true);
+  const sane = stage.saneRegion();
+  root.traverse((o: any) => {
+    if (!o.isMesh || !o.geometry || o.userData.isOutline || o.material?.visible === false) return;
+    for (let p: any = o; p; p = p.parent) if (!p.visible) return;
+    o.geometry.boundingBox ?? o.geometry.computeBoundingBox();
+    const c = o.geometry.boundingBox?.clone().applyMatrix4(o.matrixWorld).getCenter(new THREE.Vector3());
+    if (!c || !Number.isFinite(c.x + c.y + c.z) || sane.containsPoint(c)) return;
+    out.push(`${o.name || o.type} (${o.geometry.type}) at (${c.x.toFixed(1)}, ${c.y.toFixed(1)}, ${c.z.toFixed(1)})`);
+  });
+  return out;
+}
+
 /**
  * Exercise phase of the smoke test: what a student does in the first minute.
  * Every slider to both ends and back, toggles both ways, every button, and a
  * synthetic drag on every draggable, with frames in between; then a long run.
  */
 function runExercise(frames: number) {
-  const dt = 1 / 60;
+  // a struggling phone renders at ~24 fps: hand-rolled Euler steps that are stable at
+  // 60 fps (the main smoke run) grow without bound here
+  const dt = 1 / 24;
+  const escaped = new Set<string>();
+  const checkEscaped = (when: string) => findEscaped().slice(0, 3).forEach((e) => escaped.add(`${e} after ${when}`));
   const before = errors.length;
   let t = gsap.ticker.time || 0;
   let steps = 0;
@@ -192,6 +214,22 @@ function runExercise(frames: number) {
     }
     run(12);
   };
+  const sliders = (internals?.controlSpecs ?? []).filter((c) => c.type === 'slider');
+  // every combination of slider extremes matters (e.g. weak damping + fast rotation):
+  // all-min, all-max, and the two alternating corners
+  if (sliders.length) {
+    const corners = [(_i: number) => 'min', (_i: number) => 'max', (i: number) => (i % 2 ? 'max' : 'min'), (i: number) => (i % 2 ? 'min' : 'max')] as const;
+    for (const pick of corners) {
+      const desc = sliders.map((c, i) => `${c.key}=${pick(i) === 'min' ? c.min : c.max}`).join(', ');
+      sliders.forEach((c, i) => call(c.key, pick(i) === 'min' ? c.min : c.max));
+      // a student can leave it like this for a while: slow blow-ups (0.2 %/frame) only show
+      // after tens of seconds. Simulate 40 s (960 frames) without drawing, then check.
+      stage.skipRender = true;
+      run(960);
+      stage.skipRender = false;
+      checkEscaped(`setting ${desc} for 40 s`);
+    }
+  }
   for (const c of internals?.controlSpecs ?? []) {
     if (c.type === 'slider') {
       for (const v of [c.min, c.max, (c.min + c.max) / 2, c.value]) call(c.key, v);
@@ -231,7 +269,8 @@ function runExercise(frames: number) {
   void stage.activate(() => {});
   run(200);
   run(frames);
-  post({ type: 'exercise-report', errors: errors.slice(before, before + 20), nanObjects: findNaN(), steps });
+  checkEscaped('the full exercise');
+  post({ type: 'exercise-report', errors: errors.slice(before, before + 20), nanObjects: findNaN(), escaped: [...escaped].slice(0, 6), steps });
 }
 
 // heartbeat for the host's watchdog

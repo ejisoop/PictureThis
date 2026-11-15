@@ -418,12 +418,38 @@ export class Stage {
     }
   }
 
-  /** world-space bounds of the visible model (no outlines, hit areas or faded parts) */
+  /**
+   * A generous world-space region around the printed figure (its footprint
+   * grown by 1.5x its size on every side, so ~4x across, and well above the
+   * page). Modules are told to stay within ~1.3x the figure; a mesh whose centre
+   * is outside this has flown off (a runaway simulation), so camera framing and
+   * the lift ignore it rather than chase it.
+   */
+  saneRegion() {
+    const f = this.figureWorld();
+    const s = Math.max(f.w, f.h, 0.1 * Math.min(this.W, this.H));
+    const m = s * 1.5;
+    const b = new THREE.Box3(new THREE.Vector3(f.x0 - m, -s, f.z0 - m), new THREE.Vector3(f.x0 + f.w + m, s * 3, f.z0 + f.h + m));
+    this.pageGroup.updateMatrixWorld(true);
+    return b.applyMatrix4(this.pageGroup.matrixWorld);
+  }
+  /** a mesh's world bounds, or null if it has flown out of the sane region (or gone NaN) */
+  private keptBox(o: any, sane: THREE.Box3) {
+    o.geometry.boundingBox ?? o.geometry.computeBoundingBox();
+    if (!o.geometry.boundingBox) return null;
+    const wb = o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld);
+    const c = wb.getCenter(new THREE.Vector3());
+    if (!Number.isFinite(c.x + c.y + c.z) || !sane.containsPoint(c)) return null;
+    return wb;
+  }
+
+  /** world-space bounds of the visible model (no outlines, hit areas, faded or runaway parts) */
   modelBox() {
     const box = new THREE.Box3();
     const root = this.viz?.root;
     if (!root) return box;
     root.updateMatrixWorld(true);
+    const sane = this.saneRegion();
     root.traverse((o: any) => {
       if (!o.geometry || o.userData.isOutline || o.material?.visible === false) return;
       let p: THREE.Object3D | null = o;
@@ -433,8 +459,8 @@ export class Stage {
       }
       const m = Array.isArray(o.material) ? o.material[0] : o.material;
       if (m && m.transparent && (m.uniforms?.uOpacity?.value ?? m.opacity) < 0.15) return;
-      o.geometry.boundingBox ?? o.geometry.computeBoundingBox();
-      if (o.geometry.boundingBox) box.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld));
+      const wb = this.keptBox(o, sane);
+      if (wb) box.union(wb);
     });
     return box;
   }
@@ -668,6 +694,9 @@ export class Stage {
   }
 
   // ---- frame ------------------------------------------------------------------
+  /** headless validation only: step the simulation without drawing (much faster) */
+  skipRender = false;
+
   frame(dt: number) {
     const t0 = performance.now();
     this.time += dt;
@@ -683,6 +712,7 @@ export class Stage {
     this.keepAbovePaper(dt);
     this.marginEl.classList.toggle('show', this.active && !this.busy && this.marginEl.childElementCount > 0);
     this.controls.update();
+    if (this.skipRender) return;
     const res = new THREE.Vector2();
     this.renderer.getDrawingBufferSize(res);
     for (const m of lineMaterials) m.resolution.copy(res);
@@ -708,14 +738,14 @@ export class Stage {
       this.lift.acc = 0;
       root.updateMatrixWorld(true);
       this.liftBox.makeEmpty();
+      const sane = this.saneRegion();
       root.traverse((o: any) => {
         if (!o.visible || !o.geometry || o.userData.isOutline || o.material?.visible === false) return;
         // skip anything mostly transparent (e.g. a fading ghost) and helper hit areas
         const m = Array.isArray(o.material) ? o.material[0] : o.material;
         if (m && m.transparent && (m.uniforms?.uOpacity?.value ?? m.opacity) < 0.15) return;
-        o.geometry.boundingBox ?? o.geometry.computeBoundingBox();
-        if (!o.geometry.boundingBox) return;
-        this.liftBox.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld));
+        const wb = this.keptBox(o, sane);
+        if (wb) this.liftBox.union(wb);
       });
       if (!this.liftBox.isEmpty()) {
         // world → page-group height, without our own current lift
