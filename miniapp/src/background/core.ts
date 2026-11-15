@@ -6,7 +6,7 @@
 import type { CaptureReason, Discovery, FrameTrace, GlassesStatus, Settings } from '../shared/types';
 import { DEFAULT_SETTINGS } from '../shared/types';
 import type { AppState } from '../shared/channels';
-import { chimeDataUrl } from './chime';
+import { chimeDataUrl, dingDataUrl } from './chime';
 
 /** The subset of MiniappSession this app uses (structurally typed). */
 export interface LpSession {
@@ -53,6 +53,7 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
   let timer: ReturnType<typeof setTimeout> | null = null;
   let sessionId = '';
   const chime = chimeDataUrl();
+  const ding = dingDataUrl();
 
   // ---- UI handlers first: the host holds UI requests until setup settles --------
   const state = (): AppState => ({ status: { ...status }, settings: { ...settings }, discoveries: [...discoveries], server });
@@ -136,8 +137,8 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
       status.lastResult = busy ? 'will look as soon as the current photo arrives' : 'looking now…';
       pushStatus();
     }
-    // audible confirmation for manual looks, so the wearer knows the press registered
-    if (!status.scanning && settings.sounds === 'voice') void session.speaker.speak('Looking.').catch(() => {});
+    // a ding confirms the press registered (the discovery chime is a different, two-note bell)
+    if (settings.sounds !== 'off') void session.speaker.play({ audioUrl: ding, volume: 0.7 }).catch(() => {});
     void capture('button');
   };
   const toggleScan = (via: string) => {
