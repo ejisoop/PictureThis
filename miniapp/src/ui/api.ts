@@ -73,3 +73,17 @@ export async function fetchPrompt(server: string, key: string) {
   const r = await fetch(`${server}/v1/visualizations/prompt?key=${encodeURIComponent(key)}`);
   return r.ok ? ((await r.json()) as { system: string; user: string }) : null;
 }
+
+/**
+ * Server-hosted files (discovery photos) are always loaded through the server
+ * address the app is configured with: the URL the server wrote may be an
+ * internal one when it runs behind a cloud proxy.
+ */
+export function serverUrl(server: string, url: string) {
+  try {
+    const u = new URL(url, server);
+    return u.pathname.startsWith('/v1/') ? server.replace(/\/$/, '') + u.pathname + u.search : u.href;
+  } catch {
+    return url;
+  }
+}

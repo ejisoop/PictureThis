@@ -6,7 +6,7 @@ import { MiniappHeader, useCapsuleHeaderStyle, useHistoryState, useSafeArea } fr
 import type { AppState } from '../shared/channels';
 import type { Discovery, FrameTrace, GlassesStatus, Settings, SoundMode } from '../shared/types';
 import { Explore, type ExploreView } from './explore';
-import { fetchPrompt, type VizRecord } from './api';
+import { fetchPrompt, serverUrl, type VizRecord } from './api';
 import { deviceCheck, type DeviceReport } from './devicecheck';
 import logoUrl from '../../icon.png';
 
@@ -106,7 +106,7 @@ export function App() {
     setToast(null);
     setSheetOpen(true);
     setDevShow(null);
-    setRawPhoto(det.photoUrl);
+    setRawPhoto(serverUrl(server, det.photoUrl));
     const rawTimer = setTimeout(() => setRawPhoto(null), 1300);
     const ex = new Explore(stageHost.current, server, det, setView, {
       autoPlay: true,

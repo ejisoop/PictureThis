@@ -23,7 +23,13 @@ import type { Discovery, Figure, ModuleCtxJson, PageUnderstanding } from './type
 const app = new Hono();
 app.use('*', cors({ origin: env.corsOrigins === '*' ? '*' : env.corsOrigins.split(',') }));
 
-const base = (c: { req: { url: string } }) => env.publicUrl || new URL(c.req.url).origin;
+/** public origin of this server: PUBLIC_URL, else what a reverse proxy says, else the request */
+const base = (c: { req: { url: string; header: (k: string) => string | undefined } }) => {
+  if (env.publicUrl) return env.publicUrl.replace(/\/$/, '');
+  const host = c.req.header('x-forwarded-host')?.split(',')[0].trim() ?? c.req.header('host');
+  const proto = c.req.header('x-forwarded-proto')?.split(',')[0].trim() ?? new URL(c.req.url).protocol.replace(':', '');
+  return host ? `${proto}://${host}` : new URL(c.req.url).origin;
+};
 
 interface StoredDiscovery extends Discovery {
   internal: { page: PageUnderstanding; figure: Figure; corners: Quad };

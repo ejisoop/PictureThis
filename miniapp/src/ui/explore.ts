@@ -4,7 +4,7 @@
 // the state it reports.
 import { SandboxHost, renderPanel, type ControlSpec, type PanelApi, type FrameStats } from '@lp/runtime/host';
 import type { Discovery } from '../shared/types';
-import { requestViz, type VizRecord } from './api';
+import { requestViz, serverUrl, type VizRecord } from './api';
 import { PLACEHOLDER_MODULE } from './placeholder';
 
 export type ExploreState = 'photo-loading' | 'generating' | 'ready' | 'lifting' | 'interactive' | 'folding' | 'photo' | 'failed';
@@ -63,9 +63,13 @@ export class Explore {
     // 1. the page photo, flattened, with pencil corner marks
     this.set({ state: 'photo-loading' });
     try {
-      this.photo = await (await fetch(this.d.photoUrl)).blob();
+      const r = await fetch(serverUrl(this.server, this.d.photoUrl));
+      if (r.status === 404) throw new Error('gone');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      this.photo = await r.blob();
     } catch (e) {
-      this.set({ state: 'failed', failure: 'Couldn’t load the page photo.', errors: [String((e as Error).message)] });
+      const gone = (e as Error).message === 'gone';
+      this.set({ state: 'failed', failure: gone ? 'This page was found on a different server.' : 'Couldn’t load the page photo.', errors: [gone ? 'Look at the page again to rediscover it (Settings → Developer → forget discoveries clears old ones).' : String((e as Error).message)] });
       this.report('failed', 'photo download');
       return;
     }
@@ -97,7 +101,8 @@ export class Explore {
         if (this.writingTimer) clearInterval(this.writingTimer);
         if (e.type === 'done') void this.mount(e.viz);
         else {
-          this.set({ state: 'failed', failure: 'Couldn’t animate this one.', errors: [...this.view.errors, ...e.errors], viz: e.viz });
+          const gone = e.errors.some((x) => /discovery not found/.test(x));
+          this.set({ state: 'failed', failure: gone ? 'This page was found on a different server.' : 'Couldn’t animate this one.', errors: [...this.view.errors, ...(gone ? ['Look at the page again to rediscover it (Settings → Developer → forget discoveries clears old ones).'] : e.errors)], viz: e.viz });
           this.report('failed', `generation: ${e.errors[0] ?? ''}`);
         }
       }
