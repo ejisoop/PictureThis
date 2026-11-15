@@ -8,6 +8,7 @@ import type { Discovery, FrameTrace, GlassesStatus, Settings, SoundMode } from '
 import { Explore, type ExploreView } from './explore';
 import { fetchPrompt, type VizRecord } from './api';
 import { deviceCheck, type DeviceReport } from './devicecheck';
+import logoUrl from '../../icon.png';
 
 const ago = (t: number) => {
   const s = Math.round((Date.now() - t) / 1000);
@@ -163,7 +164,7 @@ export function App() {
       <div className={`lp-app ${openId ? 'exploring' : 'home'}`}>
         {/* home ------------------------------------------------------------------ */}
         <section className="home-screen">
-          <MiniappHeader title={<span className="app-title">PictureThis</span>} />
+          <MiniappHeader title={<span className="app-title"><img className="app-logo" src={logoUrl} alt="" />PictureThis</span>} />
           <div className="app-sub">
             {status ? (
               status.error ? <span className="err">{status.error}</span> : !status.connected ? 'waiting for your Mentra Live…' : !status.hasCamera ? 'these glasses have no camera' : <>Mentra Live{scanning ? <span className="rec"> · camera on</span> : ' · paused'}</>

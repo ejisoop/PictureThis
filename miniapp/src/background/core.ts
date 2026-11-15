@@ -14,7 +14,11 @@ export interface LpSession {
   camera: {
     takePhoto(o: { size?: 'low' | 'medium' | 'high' | 'max'; compress?: 'none' | 'low' | 'medium' | 'high'; sound?: boolean; timeoutMs?: number; mode?: 'photo' | 'text'; transferMethod?: 'auto' | 'direct' | 'ble' }): Promise<{ photoUrl: string; mimeType: string; size: number; requestId: string }>;
   };
-  input: { onButtonPress(h: (d: { buttonId: string; pressType: 'short' | 'long' }) => void): () => void };
+  input: {
+    onButtonPress(h: (d: { buttonId: string; pressType: 'short' | 'long' }) => void): () => void;
+    /** temple touch gestures (single_tap, double_tap, long_press, swipe_up/down…) */
+    onTouch?(h: (d: { kind: string }) => void): () => void;
+  };
   speaker: { play(o: { audioUrl: string; volume?: number; stopOtherAudio?: boolean }): Promise<void>; speak(text: string, o?: { stopOtherAudio?: boolean }): Promise<unknown> };
   storage: { get(k: string): Promise<string | null>; set(k: string, v: string): Promise<void> };
   ui: {
@@ -111,9 +115,31 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
   }
 
   // ---- input from the glasses -----------------------------------------------------
-  session.input.onButtonPress(({ pressType }) => {
-    if (pressType === 'short') void capture('button');
-    else setScanning(!status.scanning, true);
+  // Short press / single tap = look now (works while paused: "manual mode").
+  // Long press = pause or resume scanning. Every input is logged to the server
+  // so it's easy to see what the glasses actually send.
+  const lookNow = (via: string) => {
+    logCapture('input', 0, `${via} → look now${status.scanning ? '' : ' (paused: manual look)'}${busy ? ' (queued: a photo is still arriving)' : ''}`);
+    if (!status.scanning || busy) {
+      status.lastResult = busy ? 'will look as soon as the current photo arrives' : 'looking now…';
+      pushStatus();
+    }
+    // audible confirmation for manual looks, so the wearer knows the press registered
+    if (!status.scanning && settings.sounds === 'voice') void session.speaker.speak('Looking.').catch(() => {});
+    void capture('button');
+  };
+  const toggleScan = (via: string) => {
+    logCapture('input', 0, `${via} → ${status.scanning ? 'pause' : 'resume'} scanning`);
+    setScanning(!status.scanning, true);
+  };
+  session.input.onButtonPress(({ buttonId, pressType }) => {
+    if (pressType === 'long') toggleScan(`button ${buttonId} long`);
+    else lookNow(`button ${buttonId} ${pressType}`);
+  });
+  session.input.onTouch?.(({ kind }) => {
+    if (kind === 'single_tap') lookNow(`touch ${kind}`);
+    else if (kind === 'long_press') toggleScan(`touch ${kind}`);
+    else logCapture('input', 0, `touch ${kind} (unused)`);
   });
 
   function setScanning(on: boolean, fromGlasses: boolean) {

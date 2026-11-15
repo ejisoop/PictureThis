@@ -34,7 +34,8 @@ button { font-family: inherit; color: inherit; cursor: pointer; }
   radial-gradient(ellipse at 20% 0%, #fbf6ea, var(--paper) 60%); }
 .app-head { padding-right: 110px; margin: 2px 0 14px; }
 .app-title { font-size: 28px; font-weight: 500; line-height: 1.1; }
-.app-title::before { content: '✦ '; color: var(--coral-deep); font-size: 22px; }
+.app-title { display: inline-flex; align-items: center; gap: 9px; }
+.app-logo { width: 30px; height: 30px; border-radius: 8px; flex: none; box-shadow: 0 1px 3px rgba(80, 55, 25, 0.25); }
 .app-sub { font-size: 13px; color: var(--graphite); font-style: italic; margin-top: 3px; }
 .app-sub .rec { color: var(--coral-deep); }
 
