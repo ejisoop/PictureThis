@@ -29,6 +29,8 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useHistoryState('settings', false);
   const [toast, setToast] = useState<Toast>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
+  /** discovery whose delete button was tapped once (a second tap deletes it) */
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [rawPhoto, setRawPhoto] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(true);
   const [view, setView] = useState<ExploreView | null>(null);
@@ -91,6 +93,20 @@ export function App() {
       offs.forEach((o) => o());
     };
   }, []);
+
+  useEffect(() => {
+    if (!confirmDel) return;
+    const t = setTimeout(() => setConfirmDel(null), 3000);
+    return () => clearTimeout(t);
+  }, [confirmDel]);
+  const forget = (d: Discovery) => {
+    if (confirmDel !== d.id) return setConfirmDel(d.id);
+    setConfirmDel(null);
+    setDets((ds) => ds.filter((x) => x.id !== d.id));
+    setToast((t) => (t?.d.id === d.id ? null : t));
+    if (highlight === d.id) setHighlight(null);
+    mentra.send('forget-discovery', { discoveryId: d.id });
+  };
 
   useEffect(() => {
     if (!toast) return;
@@ -183,14 +199,19 @@ export function App() {
           <div className="disc-list">
             {dets.length === 0 && <div className="empty">Nothing yet. When your glasses spot a figure I can bring to life, it’ll appear here.</div>}
             {dets.map((d) => (
-              <button key={d.id} className={`disc-card ${highlight === d.id ? 'hl' : ''}`} onClick={() => open(d)}>
-                <img className="thumb" src={d.thumb} alt="" />
-                <span className="dc-body">
-                  <b>{d.title}</b>
-                  <span>{d.pageNumber ? `p. ${d.pageNumber} · ` : ''}{d.figureLabel} · {ago(d.ts)}</span>
-                </span>
-                <span className="dc-go">›</span>
-              </button>
+              <div key={d.id} className="disc-row">
+                <button className={`disc-card ${highlight === d.id ? 'hl' : ''}`} onClick={() => open(d)}>
+                  <img className="thumb" src={d.thumb} alt="" />
+                  <span className="dc-body">
+                    <b>{d.title}</b>
+                    <span>{d.pageNumber ? `p. ${d.pageNumber} · ` : ''}{d.figureLabel} · {ago(d.ts)}</span>
+                  </span>
+                  <span className="dc-go">›</span>
+                </button>
+                <button className={`dc-del ${confirmDel === d.id ? 'confirm' : ''}`} onClick={() => forget(d)} aria-label={confirmDel === d.id ? `Confirm delete ${d.title}` : `Delete ${d.title}`}>
+                  {confirmDel === d.id ? 'Delete' : '✕'}
+                </button>
+              </div>
             ))}
           </div>
           <div className="home-foot">

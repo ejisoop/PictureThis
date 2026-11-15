@@ -72,8 +72,11 @@ export class Stage {
   private raf = 0;
   private ray = new THREE.Raycaster();
   private drag: Interactive | null = null;
+  private dragPointer = -1;
   private hovered: Interactive | null = null;
   private lastTap = 0;
+  /** pointers currently down on the canvas: a second finger means pinch/pan, never a grab or a double-tap */
+  private pointers = new Set<number>();
   private photoTex: THREE.Texture | null = null;
   viewShift = { v: 0 };
   /** keep-above-the-paper: how far the model is raised so nothing sinks into the (opaque) page */
@@ -129,16 +132,20 @@ export class Stage {
     el.addEventListener('pointermove', (e) => this.onMove(e));
     el.addEventListener('pointerup', (e) => this.onUp(e));
     el.addEventListener('pointercancel', (e) => this.onUp(e));
+    el.addEventListener('lostpointercapture', (e) => this.pointers.delete(e.pointerId));
     this.controls = new OrbitControls(this.camera, el);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
-    this.controls.enablePan = false;
+    // one finger orbits; two fingers pinch-zoom and pan (double-tap re-frames the model)
+    this.controls.enablePan = true;
+    this.controls.screenSpacePanning = true;
+    this.controls.zoomToCursor = true;
     this.controls.rotateSpeed = 0.6;
-    this.controls.minDistance = 1.2;
+    this.controls.minDistance = 0.25;
     this.controls.maxDistance = 9;
     this.controls.minPolarAngle = 0.02;
     this.controls.maxPolarAngle = 1.25;
-    this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE };
+    this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
     this.controls.enabled = false;
     this.controls.addEventListener('start', () => this.hooks.onTouch('orbit'));
 
@@ -364,6 +371,8 @@ export class Stage {
 
   moveCamera(v: { target: THREE.Vector3; dist: number; polar: number; az: number }, duration = 1.4) {
     this.controls.maxDistance = Math.max(9, v.dist * 1.6);
+    // allow zooming in to ~8x the framed view, whatever the model's scale
+    this.controls.minDistance = THREE.MathUtils.clamp(v.dist * 0.12, 0.12, 1.2);
     const to = new THREE.Vector3().setFromSpherical(new THREE.Spherical(v.dist, v.polar, v.az)).add(v.target);
     gsap.killTweensOf(this.camTween);
     if (!duration) {
@@ -592,15 +601,27 @@ export class Stage {
     return null;
   }
   private onDown(e: PointerEvent) {
+    this.pointers.add(e.pointerId);
+    if (this.pointers.size > 1) {
+      // second finger: a pinch/pan. Drop any grab and hand the gesture to the camera.
+      this.lastTap = 0;
+      if (this.drag) this.endDrag();
+      this.controls.enabled = this.active;
+      return;
+    }
+    if (this.active && !this.busy) gsap.killTweensOf(this.camTween); // the user takes over from a re-framing animation
     const now = performance.now();
-    if (now - this.lastTap < 300) this.resetView();
-    this.lastTap = now;
+    if (now - this.lastTap < 300) {
+      this.lastTap = 0;
+      this.resetView();
+    } else this.lastTap = now;
     this.setRay(e);
     const p = this.pick();
     if (!p) return;
     this.controls.enabled = false; // veto the orbit for this gesture
     this.renderer.domElement.setPointerCapture(e.pointerId);
     this.drag = p.item;
+    this.dragPointer = e.pointerId;
     this.guard(() => p.item.onDown?.(p.hit, this.ray.ray));
     this.hooks.onTouch('grab');
   }
@@ -622,9 +643,14 @@ export class Stage {
     }
   }
   private onUp(e: PointerEvent) {
+    this.pointers.delete(e.pointerId);
+    if (!this.drag) return;
+    this.endDrag();
+  }
+  private endDrag() {
     if (!this.drag) return;
     try {
-      this.renderer.domElement.releasePointerCapture(e.pointerId);
+      this.renderer.domElement.releasePointerCapture(this.dragPointer);
     } catch {
       /* not captured */
     }

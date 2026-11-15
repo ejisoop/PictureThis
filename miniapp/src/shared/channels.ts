@@ -29,6 +29,7 @@ export interface Channels {
   'capture-now': { at: number };
   'discovery-opened': { discoveryId: string };
   'forget-discoveries': { at: number };
+  'forget-discovery': { discoveryId: string };
 
   // RPC
   'get-state': Rpc<Record<string, never>, AppState>;

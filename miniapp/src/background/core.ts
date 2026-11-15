@@ -78,6 +78,18 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
   session.ui.on('discovery-opened', ({ discoveryId }) => {
     pending = pending.filter((d) => d.id !== discoveryId);
   });
+  session.ui.on('forget-discovery', ({ discoveryId }) => {
+    const d = discoveries.find((x) => x.id === discoveryId);
+    discoveries = discoveries.filter((x) => x.id !== discoveryId);
+    pending = pending.filter((x) => x.id !== discoveryId);
+    // if nothing else is left from that page, looking at it again can rediscover (and chime)
+    if (d && !discoveries.some((x) => x.pageKey === d.pageKey)) {
+      cuedPages.delete(d.pageKey);
+      if (lastRevisitPage === d.pageKey) lastRevisitPage = null;
+    }
+    persist();
+    void fetch(`${server}/v1/sessions/${encodeURIComponent(sessionId)}/discoveries/${encodeURIComponent(discoveryId)}`, { method: 'DELETE' }).catch(() => {});
+  });
   session.ui.on('forget-discoveries', () => {
     discoveries = [];
     pending = [];
@@ -164,12 +176,13 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
     text: { size: 'medium', compress: 'high', mode: 'text', transferMethod: 'ble' },
   } as const;
   /**
-   * White pages blow out under auto-exposure. aeExposureDivisor lets the glasses
-   * meter as usual, then shortens the metered exposure by this factor (scan
-   * mode), so the paper stays below clipping and ink/figure edges keep detail.
-   * 1 = plain auto-exposure; raise it if pages still look washed out.
+   * White pages blow out under auto-exposure. The glasses meter as usual, then
+   * divide the metered exposure by aeExposureDivisor (scan mode). Without an
+   * ISO cap the camera can win the brightness back with gain, so cap it too.
+   * The server logs luma/clipped% per frame (stage_log 'gate'): aim for
+   * clipped well under 5%. Raise the divisor / lower the cap if still washed out.
    */
-  const AE_EXPOSURE_DIVISOR = 1.6;
+  const EXPOSURE = { aeExposureDivisor: 4.5, isoCap: 300 } as const;
   let delivery: keyof typeof DELIVERY = 'auto';
   let deliveryOkCount = 0;
   let captureCount = 0;
@@ -210,7 +223,7 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
       const t0 = Date.now();
       // resolves after the photo has been uploaded; we only ever forward the URL
       // 45 s: without Wi-Fi the glasses relay the photo over BLE, which is slow
-      const photo = await session.camera.takePhoto({ ...DELIVERY[delivery], aeExposureDivisor: AE_EXPOSURE_DIVISOR, sound: false, timeoutMs: 45000 });
+      const photo = await session.camera.takePhoto({ ...DELIVERY[delivery], ...EXPOSURE, sound: false, timeoutMs: 45000 });
       trace.timings.capture = Date.now() - t0;
       captureMs.push(trace.timings.capture);
       if (captureMs.length > 20) captureMs.shift();

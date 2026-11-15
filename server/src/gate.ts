@@ -9,6 +9,9 @@ export interface FrameStats {
   hash: bigint;
   width: number;
   height: number;
+  /** mean luma 0–255 and % of pixels at ≥250 (blown-out), for tuning exposure */
+  brightness: number;
+  clippedPct: number;
 }
 
 export async function frameStats(buf: Buffer): Promise<FrameStats> {
@@ -28,6 +31,8 @@ export async function frameStats(buf: Buffer): Promise<FrameStats> {
       n++;
     }
   }
+  let lum = 0, clipped = 0;
+  for (let i = 0; i < data.length; i++) { lum += data[i]; if (data[i] >= 250) clipped++; }
   const mean = sum / n;
   const sharpness = sum2 / n - mean * mean;
   // 64-bit difference hash (9×8)
@@ -35,7 +40,7 @@ export async function frameStats(buf: Buffer): Promise<FrameStats> {
   let hash = 0n;
   for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) hash = (hash << 1n) | (d[y * 9 + x] < d[y * 9 + x + 1] ? 1n : 0n);
   const rot = (meta.orientation ?? 1) >= 5;
-  return { sharpness, hash, width: (rot ? meta.height : meta.width) ?? 0, height: (rot ? meta.width : meta.height) ?? 0 };
+  return { sharpness, hash, width: (rot ? meta.height : meta.width) ?? 0, height: (rot ? meta.width : meta.height) ?? 0, brightness: lum / data.length, clippedPct: (100 * clipped) / data.length };
 }
 
 export function hamming(a: bigint, b: bigint) {
@@ -91,6 +96,15 @@ export function markAnalysed(sessionId: string, hash: bigint, pageKey: string | 
   if (!s) return;
   s.analysedHash = hash;
   s.analysedPageKey = pageKey;
+}
+
+/** forget that a page was analysed, so looking at it again re-reads it */
+export function forgetPage(sessionId: string, pageKey: string) {
+  const s = sessions.get(sessionId);
+  if (s && s.analysedPageKey === pageKey) {
+    s.analysedHash = null;
+    s.analysedPageKey = null;
+  }
 }
 
 export function resetSession(sessionId: string) {

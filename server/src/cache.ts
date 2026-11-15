@@ -51,6 +51,14 @@ export function recentDiscoveries(limit = 500): Discovery[] {
   return (db.query('SELECT record FROM discovery ORDER BY created DESC LIMIT ?').all(limit) as { record: string }[]).map((r) => JSON.parse(r.record));
 }
 
+/** removes one discovery (and its page photo); only the session that found it may delete it */
+export function deleteDiscovery(session: string, id: string): Discovery | null {
+  const r = db.query('SELECT record FROM discovery WHERE id = ? AND session = ?').get(id, session) as { record: string } | null;
+  if (!r) return null;
+  db.query('DELETE FROM discovery WHERE id = ?').run(id);
+  return JSON.parse(r.record) as Discovery;
+}
+
 export function discoveriesForSession(session: string): Discovery[] {
   return (db.query('SELECT record FROM discovery WHERE session = ? ORDER BY created DESC').all(session) as { record: string }[]).map((r) => JSON.parse(r.record));
 }

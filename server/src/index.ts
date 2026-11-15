@@ -14,10 +14,10 @@ import { RUNTIME_VERSION } from '@lp/runtime/bundle';
 import { pageBoxToPhotoBox, type Quad } from '@lp/runtime/host';
 import { env } from './env';
 import { fetchPhoto, putUpload, getUpload } from './photos';
-import { frameStats, gate, markAnalysed, resetSession } from './gate';
+import { forgetPage, frameStats, gate, markAnalysed, resetSession } from './gate';
 import { understand, understandFast, understandDetails, prepareImage } from './understand';
 import { startGeneration, subscribe, jobFor, type JobEvent } from './generate';
-import { recentDiscoveries, vizKey, getViz, vizPng, putDiscovery, getDiscovery, discoveryPhoto, discoveriesForSession, logStage, stageSummary, listViz } from './cache';
+import { recentDiscoveries, vizKey, getViz, vizPng, putDiscovery, getDiscovery, discoveryPhoto, discoveriesForSession, deleteDiscovery, logStage, stageSummary, listViz } from './cache';
 import type { Discovery, Figure, ModuleCtxJson, PageUnderstanding } from './types';
 
 const app = new Hono();
@@ -79,7 +79,7 @@ app.post('/v1/frames', async (c) => {
   const force = reason !== 'scan';
   const g = gate(sessionId, stats, force);
   timings.gate = performance.now() - tg;
-  logStage(sessionId, 'gate', timings.gate, `${g.action}${'reason' in g ? ' ' + g.reason : ''} sharp=${stats.sharpness.toFixed(0)}`);
+  logStage(sessionId, 'gate', timings.gate, `${g.action}${'reason' in g ? ' ' + g.reason : ''} sharp=${stats.sharpness.toFixed(0)} ${stats.width}x${stats.height} luma=${stats.brightness.toFixed(0)} clipped=${stats.clippedPct.toFixed(1)}%`);
   const gateInfo = { sharpness: Math.round(stats.sharpness), hash: stats.hash.toString(16).padStart(16, '0'), decision: g.action, reason: 'reason' in g ? g.reason : null, size: [stats.width, stats.height] };
   if (g.action !== 'analyse') {
     const known = g.action === 'skip' && g.reason === 'unchanged' && g.pageKey ? deliveredFor(sessionId).get(g.pageKey) : undefined;
@@ -240,7 +240,7 @@ async function cropToPage(buf: Buffer, q: Quad) {
   const x1 = Math.min(1, Math.max(...xs) + m), y1 = Math.min(1, Math.max(...ys) + m);
   const left = Math.floor(x0 * W), top = Math.floor(y0 * H);
   const width = Math.max(16, Math.min(W - left, Math.ceil((x1 - x0) * W))), height = Math.max(16, Math.min(H - top, Math.ceil((y1 - y0) * H)));
-  const photo = await sharp(await img.toBuffer()).extract({ left, top, width, height }).resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 86 }).toBuffer();
+  const photo = await sharp(await img.toBuffer()).extract({ left, top, width, height }).resize({ width: 3200, height: 3200, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
   const corners = q.map(([x, y]) => [((x * W - left) / width), ((y * H - top) / height)]) as Quad;
   return { photo, corners };
 }
@@ -272,6 +272,20 @@ app.get('/v1/discoveries/:id/photo.jpg', (c) => {
   return p ? c.body(new Uint8Array(p), 200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=86400' }) : c.json({ error: 'not found' }, 404);
 });
 app.get('/v1/sessions/:id/discoveries', (c) => c.json(discoveriesForSession(c.req.param('id')).map((d) => publicDiscovery(d, base(c)))));
+app.delete('/v1/sessions/:id/discoveries/:discoveryId', (c) => {
+  const sessionId = c.req.param('id');
+  const d = deleteDiscovery(sessionId, c.req.param('discoveryId'));
+  if (!d) return c.json({ error: 'not found' }, 404);
+  // let the page be discovered again
+  const m = delivered.get(sessionId);
+  const left = (m?.get(d.pageKey) ?? []).filter((x) => x !== d.id);
+  if (left.length) m?.set(d.pageKey, left);
+  else {
+    m?.delete(d.pageKey);
+    forgetPage(sessionId, d.pageKey);
+  }
+  return c.json({ ok: true });
+});
 app.post('/v1/sessions/:id/reset', (c) => {
   resetSession(c.req.param('id'));
   delivered.delete(c.req.param('id'));
