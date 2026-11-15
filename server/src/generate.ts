@@ -135,17 +135,19 @@ async function run(key: string, input: GenInput, emit: (e: JobEvent) => void): P
     // repairs: include the previous attempt and its errors (single-turn for simplicity)
     if (attempt > 1 && best) parts.push({ text: repairPrompt(best.out.code, lastErrors) });
     const tg = performance.now();
+    // repairs can use a stronger model (GEMINI_REPAIR_MODEL): fewer, harder calls
+    const model = attempt > 1 && env.repairModel ? env.repairModel : env.codeModel;
     const { data, ms } = await generateJson<{ title: string; summary: string; controls: string[]; code: string }>({
-      model: env.codeModel,
+      model,
       system,
       parts,
       schema: CODEGEN_SCHEMA,
-      thinking: env.codeThinking,
+      thinking: attempt > 1 && env.repairModel ? env.repairThinking : env.codeThinking,
       temperature: attempt === 1 ? 0.6 : 0.3,
       timeoutMs: 120_000,
     });
     timings[`gemini${attempt}`] = ms;
-    logStage(input.sessionId, 'gemini', performance.now() - tg, `${env.codeModel} attempt ${attempt}`);
+    logStage(input.sessionId, 'gemini', performance.now() - tg, `${model} attempt ${attempt}`);
     const out = { title: String(data.title ?? fig.title), summary: String(data.summary ?? ''), controls: Array.isArray(data.controls) ? data.controls.map(String) : [], code: stripFences(String(data.code ?? '')) };
     history.push({ role: 'model', text: out.code });
 
@@ -169,7 +171,7 @@ async function run(key: string, input: GenInput, emit: (e: JobEvent) => void): P
   const rec: VizRecord = {
     key, pageKey: input.pageKey, figureId: fig.id, runtimeVersion: RUNTIME_VERSION, source: 'generated',
     code: best?.out.code ?? '', title: best?.out.title ?? fig.title, summary: best?.out.summary ?? '', controls: best?.out.controls ?? [],
-    model: env.codeModel, attempts: history.length,
+    model: env.repairModel && history.length > 1 ? `${env.codeModel} + ${env.repairModel} (repair)` : env.codeModel, attempts: history.length,
     validation: { ok, errors: best?.errors ?? ['no output'], report: best?.smoke?.report ? { ...best.smoke.report, png: undefined } : null },
     screenshot: best?.smoke?.screenshot ? `/v1/visualizations/${encodeURIComponent(key)}/screenshot.png` : null,
     prompt: { system, user }, timings: { ...timings, total: performance.now() - t0 }, createdAt: Date.now(), ctx: input.ctx,

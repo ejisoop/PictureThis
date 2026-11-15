@@ -70,6 +70,7 @@ export type GateDecision =
 export function gate(sessionId: string, stats: FrameStats, force: boolean): GateDecision {
   const s = sessions.get(sessionId) ?? { prevHash: null, stable: 0, analysedHash: null, analysedPageKey: null, lastSeen: 0 };
   sessions.set(sessionId, s);
+  const gapMs = s.lastSeen ? Date.now() - s.lastSeen : Infinity;
   s.lastSeen = Date.now();
   if (stats.sharpness < env.blurThreshold && !force) return { action: 'skip', reason: 'blurry', stats };
   const same = (a: bigint | null) => a !== null && hamming(a, stats.hash) <= env.sameFrameBits;
@@ -77,7 +78,11 @@ export function gate(sessionId: string, stats: FrameStats, force: boolean): Gate
   s.prevHash = stats.hash;
   if (force) return { action: 'analyse', stats };
   if (same(s.analysedHash)) return { action: 'skip', reason: 'unchanged', stats, pageKey: s.analysedPageKey };
-  if (s.stable < env.stableFrames) return { action: 'wait', reason: 'settling', stats, stable: s.stable };
+  // "Settling" waits for N similar frames in a row so we don't analyse a page mid-turn.
+  // When frames arrive slowly (BLE / slow uploads: ~10 s apart), waiting for a second
+  // one doubles the time to chime, and a sharp frame is already a steady one.
+  const slowLink = gapMs > env.settleMaxGapMs;
+  if (s.stable < env.stableFrames && !slowLink) return { action: 'wait', reason: 'settling', stats, stable: s.stable };
   return { action: 'analyse', stats };
 }
 

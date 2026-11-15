@@ -25,6 +25,13 @@ export const env = {
   /** dHash hamming distance under which two frames show the same page */
   sameFrameBits: num(process.env.SAME_FRAME_BITS, 10),
   stableFrames: num(process.env.STABLE_FRAMES, 2),
+  /** if frames are further apart than this, one sharp frame counts as settled (ms) */
+  settleMaxGapMs: num(process.env.SETTLE_MAX_GAP_MS, 4500),
+  /** longest image side for the fast first pass (before the chime) */
+  visionFastMaxSide: num(process.env.GEMINI_VISION_FAST_MAX_SIDE, 1024),
+  /** model for repair attempts after a failed validation (default: the code model) */
+  repairModel: process.env.GEMINI_REPAIR_MODEL || '',
+  repairThinking: level(process.env.GEMINI_REPAIR_THINKING, 'MEDIUM'),
   visualizableThreshold: num(process.env.VISUALIZABLE_THRESHOLD, 0.6),
   maxRepairs: num(process.env.MAX_REPAIRS, 2),
   /** serve a matching example module for well-known concepts instead of generating */

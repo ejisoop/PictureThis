@@ -45,12 +45,34 @@ export function staticCheck(code: string): StaticResult {
   else if (def.declaration.params.length < 1) errors.push('create() must take (lp, ctx)');
 
   const line = (n: Node) => (n.loc ? ` (line ${n.loc.start.line})` : '');
+  // names the module declares itself (const top = …, function parent(…), (self) => …)
+  // are local variables, not the browser globals: only free uses are denied.
+  // eval / Function / import() stay denied in every form.
+  const declared = new Set<string>();
+  const addPattern = (p: Node | null) => {
+    if (!p) return;
+    if (p.type === 'Identifier') declared.add(p.name);
+    else if (p.type === 'ObjectPattern') p.properties.forEach((q: Node) => addPattern(q.type === 'RestElement' ? q.argument : q.value));
+    else if (p.type === 'ArrayPattern') p.elements.forEach((q: Node | null) => q && addPattern(q.type === 'RestElement' ? q.argument : q));
+    else if (p.type === 'AssignmentPattern') addPattern(p.left);
+    else if (p.type === 'RestElement') addPattern(p.argument);
+  };
+  walk(ast, (n) => {
+    if (n.type === 'VariableDeclarator') addPattern(n.id);
+    if ((n.type === 'FunctionDeclaration' || n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression') ) {
+      if (n.id) declared.add(n.id.name);
+      n.params.forEach((q: Node) => addPattern(q));
+    }
+    if (n.type === 'ClassDeclaration' && n.id) declared.add(n.id.name);
+    if (n.type === 'CatchClause' && n.param) addPattern(n.param);
+  });
+  const ALWAYS = new Set(['eval', 'Function']);
   walk(ast, (n, p, key) => {
     if (n.type === 'ImportExpression') errors.push(`dynamic import() is not allowed${line(n)}`);
     if (n.type === 'Identifier') {
       // property names (obj.fetch, { fetch: … }) are fine; free/declared identifiers are not
       const isProp = p && ((p.type === 'MemberExpression' && key === 'property' && !p.computed) || (p.type === 'Property' && key === 'key' && !p.computed) || (p.type === 'MethodDefinition' && key === 'key') || (p.type === 'PropertyDefinition' && key === 'key'));
-      if (!isProp && DENY.has(n.name)) errors.push(`\`${n.name}\` is not available in visualizations${line(n)}`);
+      if (!isProp && DENY.has(n.name) && (ALWAYS.has(n.name) || !declared.has(n.name))) errors.push(`\`${n.name}\` is not available in visualizations${line(n)}`);
     }
     if (n.type === 'MemberExpression' && n.computed && n.property.type === 'Literal' && DENY.has(String(n.property.value))) errors.push(`\`[${JSON.stringify(n.property.value)}]\` is not allowed${line(n)}`);
     if (n.type === 'MemberExpression' && !n.computed && n.property.type === 'Identifier' && ['constructor', '__proto__', 'prototype'].includes(n.property.name) && n.object.type !== 'ThisExpression') {

@@ -332,8 +332,10 @@ async function visionCall(jpg: Buffer, prompt: string, schema: unknown, maxOutpu
 
 /** Stage 1, before the chime: page + scored figures only. */
 export async function understandFast(buf: Buffer) {
+  // the full-size image is kept for the details pass; the fast pass sends a smaller one
   const jpg = await prepareImage(buf, env.visionMaxSide);
-  const r = await visionCall(jpg, FAST_PROMPT, FAST_SCHEMA, 1024);
+  const small = env.visionFastMaxSide < env.visionMaxSide ? await prepareImage(buf, env.visionFastMaxSide) : jpg;
+  const r = await visionCall(small, FAST_PROMPT, FAST_SCHEMA, 1024);
   const n = normalise({ ...r.data, regions: [] });
   const u = r.usage as { candidatesTokenCount?: number } | undefined;
   return { ...n, jpg, ms: r.ms, raw: r.data, meta: { finish: r.finish, outTokens: u?.candidatesTokenCount ?? null, model: r.model, fallback: r.fallback } as UnderstandMeta };
