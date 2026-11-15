@@ -189,6 +189,12 @@ export function App() {
             </div>
             <button className={`switch ${scanning ? 'on' : ''}`} aria-label="Scanning" onClick={toggleScan}><i /></button>
           </div>
+          {status?.failure && (
+            <div className="capture-fail" role="alert">
+              <span>{status.failure}</span>
+              <button onClick={() => mentra.send('capture-now', { at: Date.now() })}>Try again</button>
+            </div>
+          )}
           <div className="section-label">Discoveries <span>{dets.length ? `${dets.length} found` : ''}</span></div>
           <div className="disc-list">
             {dets.length === 0 && <div className="empty">Nothing yet. When your glasses spot a figure I can bring to life, it’ll appear here.</div>}

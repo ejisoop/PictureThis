@@ -59,6 +59,11 @@ export function deleteDiscovery(session: string, id: string): Discovery | null {
   return JSON.parse(r.record) as Discovery;
 }
 
+/** removes every discovery (and page photo) a session found */
+export function deleteSessionDiscoveries(session: string): number {
+  return db.query('DELETE FROM discovery WHERE session = ?').run(session).changes;
+}
+
 export function discoveriesForSession(session: string): Discovery[] {
   return (db.query('SELECT record FROM discovery WHERE session = ? ORDER BY created DESC').all(session) as { record: string }[]).map((r) => JSON.parse(r.record));
 }

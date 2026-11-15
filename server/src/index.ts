@@ -17,7 +17,7 @@ import { fetchPhoto, putUpload, getUpload } from './photos';
 import { forgetPage, frameStats, gate, markAnalysed, resetSession } from './gate';
 import { understand, understandFast, understandDetails, prepareImage } from './understand';
 import { startGeneration, subscribe, jobFor, type JobEvent } from './generate';
-import { recentDiscoveries, vizKey, getViz, vizPng, putDiscovery, getDiscovery, discoveryPhoto, discoveriesForSession, deleteDiscovery, logStage, stageSummary, listViz } from './cache';
+import { recentDiscoveries, vizKey, getViz, vizPng, putDiscovery, getDiscovery, discoveryPhoto, discoveriesForSession, deleteDiscovery, deleteSessionDiscoveries, logStage, stageSummary, listViz } from './cache';
 import type { Discovery, Figure, ModuleCtxJson, PageUnderstanding } from './types';
 
 const app = new Hono();
@@ -276,20 +276,20 @@ app.delete('/v1/sessions/:id/discoveries/:discoveryId', (c) => {
   const sessionId = c.req.param('id');
   const d = deleteDiscovery(sessionId, c.req.param('discoveryId'));
   if (!d) return c.json({ error: 'not found' }, 404);
-  // let the page be discovered again
-  const m = delivered.get(sessionId);
-  const left = (m?.get(d.pageKey) ?? []).filter((x) => x !== d.id);
-  if (left.length) m?.set(d.pageKey, left);
-  else {
-    m?.delete(d.pageKey);
-    forgetPage(sessionId, d.pageKey);
-  }
+  // let the page be discovered again. Its other figures come back with the same
+  // (deterministic) ids, which the glasses already have, so only this one reappears.
+  delivered.get(sessionId)?.delete(d.pageKey);
+  forgetPage(sessionId, d.pageKey);
   return c.json({ ok: true });
 });
 app.post('/v1/sessions/:id/reset', (c) => {
-  resetSession(c.req.param('id'));
-  delivered.delete(c.req.param('id'));
-  return c.json({ ok: true });
+  const sessionId = c.req.param('id');
+  // delete the rows too: `delivered` is rebuilt from them, so leaving them would
+  // keep every page "already explored"
+  const removed = deleteSessionDiscoveries(sessionId);
+  resetSession(sessionId);
+  delivered.delete(sessionId);
+  return c.json({ ok: true, removed });
 });
 
 // ---- visualizations -----------------------------------------------------------------

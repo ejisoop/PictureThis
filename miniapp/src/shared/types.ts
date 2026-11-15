@@ -55,6 +55,8 @@ export interface GlassesStatus {
   /** short human-readable state of the last frame: "looking", "hold steady", "found …" */
   lastResult: string;
   error: string | null;
+  /** a manual look (button / Look now) failed even after a retry: why, plus how to try again */
+  failure: string | null;
   /** takePhoto latency (capture + upload) over the last 20 frames, ms */
   capture: { n: number; p50: number; p90: number; last: number } | null;
 }

@@ -6,7 +6,7 @@
 import type { CaptureReason, Discovery, FrameTrace, GlassesStatus, Settings } from '../shared/types';
 import { DEFAULT_SETTINGS } from '../shared/types';
 import type { AppState } from '../shared/channels';
-import { chimeDataUrl, dingDataUrl } from './chime';
+import { chimeDataUrl, dingDataUrl, errorToneDataUrl } from './chime';
 
 /** The subset of MiniappSession this app uses (structurally typed). */
 export interface LpSession {
@@ -42,7 +42,7 @@ const MAX_DISCOVERIES = 40;
 export async function livingPagesBackground(session: LpSession, cfg: BackgroundConfig) {
   const server = cfg.server.replace(/\/$/, '');
   const settings: Settings = { ...DEFAULT_SETTINGS };
-  const status: GlassesStatus = { connected: false, hasCamera: false, scanning: false, lastCaptureAt: null, lastResult: 'starting', error: null, capture: null };
+  const status: GlassesStatus = { connected: false, hasCamera: false, scanning: false, lastCaptureAt: null, lastResult: 'starting', error: null, failure: null, capture: null };
   const captureMs: number[] = [];
   let discoveries: Discovery[] = [];
   let pending: Discovery[] = []; // found while the UI was closed
@@ -54,6 +54,24 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
   let sessionId = '';
   const chime = chimeDataUrl();
   const ding = dingDataUrl();
+  const errorTone = errorToneDataUrl();
+  /** the current manual look has already been retried once automatically */
+  let manualRetried = false;
+  /** a new manual request: start fresh (one automatic retry) and clear the old failure */
+  const manualRequest = () => {
+    manualRetried = false;
+    status.failure = null;
+  };
+  /** a manual look gave up: tell the wearer why and how to try again */
+  function manualFailed(why: string) {
+    manualRetried = false;
+    status.failure = `${why} Tap the glasses button or “Look now” to try again.`;
+    status.lastResult = 'couldn’t get a photo';
+    pushStatus();
+    logCapture('manual-FAIL', 0, why);
+    if (settings.sounds === 'voice') void session.speaker.speak('Couldn’t get that photo. Tap the button to try again.').catch(() => {});
+    else if (settings.sounds === 'chime') void session.speaker.play({ audioUrl: errorTone, volume: 0.7 }).catch(() => {});
+  }
 
   // ---- UI handlers first: the host holds UI requests until setup settles --------
   const state = (): AppState => ({ status: { ...status }, settings: { ...settings }, discoveries: [...discoveries], server });
@@ -66,7 +84,10 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
   };
 
   session.ui.on('set-scanning', ({ scanning }) => setScanning(!!scanning, false));
-  session.ui.on('capture-now', () => void capture('button'));
+  session.ui.on('capture-now', () => {
+    manualRequest();
+    void capture('button');
+  });
   session.ui.on('update-settings', (p: Partial<Settings>) => {
     if (typeof p.scanIntervalMs === 'number') settings.scanIntervalMs = Math.min(10000, Math.max(1000, p.scanIntervalMs));
     if (p.sounds === 'voice' || p.sounds === 'chime' || p.sounds === 'off') settings.sounds = p.sounds;
@@ -83,8 +104,8 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
     const d = discoveries.find((x) => x.id === discoveryId);
     discoveries = discoveries.filter((x) => x.id !== discoveryId);
     pending = pending.filter((x) => x.id !== discoveryId);
-    // if nothing else is left from that page, looking at it again can rediscover (and chime)
-    if (d && !discoveries.some((x) => x.pageKey === d.pageKey)) {
+    // looking at that page again rediscovers it, with a chime
+    if (d) {
       cuedPages.delete(d.pageKey);
       if (lastRevisitPage === d.pageKey) lastRevisitPage = null;
     }
@@ -95,6 +116,7 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
     discoveries = [];
     pending = [];
     cuedPages.clear();
+    lastRevisitPage = null;
     persist();
     void fetch(`${server}/v1/sessions/${encodeURIComponent(sessionId)}/reset`, { method: 'POST' }).catch(() => {});
   });
@@ -139,6 +161,7 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
     }
     // a ding confirms the press registered (the discovery chime is a different, two-note bell)
     if (settings.sounds !== 'off') void session.speaker.play({ audioUrl: ding, volume: 0.7 }).catch(() => {});
+    manualRequest();
     void capture('button');
   };
   const toggleScan = (via: string) => {
@@ -173,7 +196,9 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
    * pages, relayed through the phone. Try the fast path again after a while.
    */
   const DELIVERY = {
-    auto: { size: 'max', compress: 'low' },
+    // 'max' still comes back 1280x960 in scan-exposure mode (same as medium), just
+    // as a bigger file: medium keeps uploads short for the same pixels
+    auto: { size: 'medium', compress: 'medium' },
     text: { size: 'medium', compress: 'high', mode: 'text', transferMethod: 'ble' },
   } as const;
   /**
@@ -187,11 +212,20 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
   let delivery: keyof typeof DELIVERY = 'auto';
   let deliveryOkCount = 0;
   let captureCount = 0;
+  /**
+   * When a capture times out the glasses are still busy with that photo (the
+   * Mentra App stopped waiting, the glasses didn't), so any request before this
+   * time is rejected with CAMERA_BUSY / BLE_TRANSFER_BUSY. Hold captures until then.
+   */
+  let cameraFreeAt = 0;
+  const STUCK_PHOTO_MS = 20000;
+  const BUSY_RETRY_MS = 5000;
   const logCapture = (stage: string, ms: number, detail: string) =>
     void fetch(`${server}/v1/log`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, stage, ms, detail }) }).catch(() => {});
   function schedule() {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(tick, settings.scanIntervalMs + backoffMs);
+    const wait = forced ? 0 : settings.scanIntervalMs + backoffMs;
+    timer = setTimeout(tick, Math.max(wait, cameraFreeAt - Date.now()));
   }
 
   async function tick() {
@@ -211,10 +245,19 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
       if (reason !== 'scan') forced = reason;
       return;
     }
+    if (Date.now() < cameraFreeAt) {
+      // the glasses are still finishing an earlier photo: a request now would just bounce
+      if (reason !== 'scan') forced = reason;
+      status.lastResult = `waiting for the glasses to finish the last photo (${Math.ceil((cameraFreeAt - Date.now()) / 1000)} s)…`;
+      pushStatus();
+      schedule();
+      return;
+    }
     refreshCaps();
     if (!status.hasCamera) {
       status.lastResult = status.connected ? 'these glasses have no camera' : 'waiting for glasses';
       pushStatus();
+      if (reason !== 'scan') manualFailed(status.connected ? 'These glasses have no camera.' : 'Your glasses aren’t connected. Reconnect them in the Mentra app.');
       return;
     }
     busy = true;
@@ -233,6 +276,8 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
       trace.photoUrl = photo.photoUrl;
       status.lastCaptureAt = Date.now();
       backoffMs = 0;
+      if (reason !== 'scan') manualRetried = false;
+      status.failure = null;
       captureCount++;
       // log the first capture, every 10th, and every one in fallback mode (so delivery speed is visible on the server)
       if (captureCount === 1 || captureCount % 10 === 0 || used !== 'auto') logCapture('capture', trace.timings.capture, `ok via ${used} (${photo.size} bytes)`);
@@ -259,10 +304,15 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
       const code = e?.code ?? '';
       // busy: the previous photo is still transferring; timeouts: slow link (BLE) — wait longer each time, up to 30 s
       backoffMs = /BUSY/.test(code) ? Math.max(backoffMs, 4000) : Math.min(30000, Math.max(5000, backoffMs * 2));
-      if (/POLL_FAILED|TIMEOUT/.test(code) && delivery === 'auto') {
-        delivery = 'text';
-        deliveryOkCount = 0;
-        backoffMs = 3000; // the next attempt uses the other path; no need to wait long
+      if (/BUSY/.test(code)) cameraFreeAt = Date.now() + BUSY_RETRY_MS;
+      if (/POLL_FAILED|TIMEOUT/.test(code)) {
+        // the timed-out photo is still transferring on the glasses: let it clear first
+        cameraFreeAt = Date.now() + STUCK_PHOTO_MS;
+        backoffMs = 0;
+        if (delivery === 'auto') {
+          delivery = 'text';
+          deliveryOkCount = 0;
+        }
       }
       trace.status = 'error';
       trace.detail = `${code} ${e?.message ?? (typeof e === 'object' ? JSON.stringify(e) : e)}`.trim().slice(0, 300);
@@ -273,8 +323,25 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
         status.error = 'Camera permission is missing';
       } else if (code === 'NOT_CONNECTED') status.lastResult = 'glasses disconnected';
       else if (/BUSY/.test(code)) status.lastResult = 'camera busy, waiting…';
-      else if (/TIMEOUT|POLL_FAILED/.test(code)) status.lastResult = delivery === 'text' ? 'photo upload timed out; switching to Bluetooth text mode' : `photo transfer timed out; retrying in ${Math.round((settings.scanIntervalMs + backoffMs) / 1000)} s`;
+      else if (/TIMEOUT|POLL_FAILED/.test(code)) status.lastResult = `photo ${used === 'auto' ? 'upload' : 'transfer'} timed out; ${delivery !== used ? 'switching to Bluetooth text mode, ' : ''}retrying in ${Math.round(STUCK_PHOTO_MS / 1000)} s`;
       else status.lastResult = `couldn’t take a photo (${code || 'error'}: ${String(e?.message ?? '').slice(0, 80)})`;
+      // a manual look: retry once by itself (after the camera frees up), then tell the wearer
+      if (reason !== 'scan' && !status.error) {
+        if (!manualRetried && code !== 'NOT_CONNECTED') {
+          manualRetried = true;
+          forced = reason;
+          cameraFreeAt = Math.max(cameraFreeAt, Date.now() + 2000);
+          status.lastResult = `that didn’t work; trying once more in ${Math.ceil((cameraFreeAt - Date.now()) / 1000)} s…`;
+        } else {
+          manualFailed(
+            code === 'NOT_CONNECTED' ? 'Your glasses disconnected.'
+            : /TIMEOUT|POLL_FAILED/.test(code) ? 'The photo didn’t come through from the glasses. Check that they’re on Wi-Fi.'
+            : /BUSY/.test(code) ? 'The camera was still busy with an earlier photo.'
+            : code ? 'The glasses couldn’t take the photo.'
+            : 'Couldn’t reach the PictureThis server. Check your phone’s connection.'
+          );
+        }
+      }
     } finally {
       busy = false;
       pushStatus();
@@ -294,7 +361,10 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
     else if (s === 'waiting') status.lastResult = 'looking…';
     else if (s === 'no-page') status.lastResult = 'no page in view';
     else if (s === 'nothing') status.lastResult = 'nothing to bring to life here';
-    else if (s === 'error') status.lastResult = 'server problem';
+    else if (s === 'error') {
+      status.lastResult = 'server problem';
+      if (reason !== 'scan') manualFailed('The PictureThis server couldn’t read that photo.');
+    }
     if ((s === 'unchanged' || s === 'already') && j.knownDiscoveries?.length) {
       status.lastResult = 'already explored';
       // surface the earlier discovery once per page visit, without a chime

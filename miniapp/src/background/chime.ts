@@ -12,6 +12,11 @@ export function dingDataUrl(): string {
   return bell('ding', 0.45, 9, 0.3, [{ f: 1760, t0: 0 }]);
 }
 
+/** a manual look failed: two low, falling notes (G5 → D5), clearly not a success sound */
+export function errorToneDataUrl(): string {
+  return bell('error', 0.7, 6, 0.32, [{ f: 784, t0: 0 }, { f: 587.3, t0: 0.16 }]);
+}
+
 function bell(key: string, secs: number, decay: number, gain: number, notes: { f: number; t0: number }[]): string {
   const hit = cache.get(key);
   if (hit) return hit;
