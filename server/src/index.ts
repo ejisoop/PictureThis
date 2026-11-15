@@ -17,7 +17,7 @@ import { fetchPhoto, putUpload, getUpload } from './photos';
 import { frameStats, gate, markAnalysed, resetSession } from './gate';
 import { understand, understandFast, understandDetails, prepareImage } from './understand';
 import { startGeneration, subscribe, jobFor, type JobEvent } from './generate';
-import { vizKey, getViz, vizPng, putDiscovery, getDiscovery, discoveryPhoto, discoveriesForSession, logStage, stageSummary, listViz } from './cache';
+import { recentDiscoveries, vizKey, getViz, vizPng, putDiscovery, getDiscovery, discoveryPhoto, discoveriesForSession, logStage, stageSummary, listViz } from './cache';
 import type { Discovery, Figure, ModuleCtxJson, PageUnderstanding } from './types';
 
 const app = new Hono();
@@ -100,6 +100,14 @@ app.post('/v1/frames', async (c) => {
   if (!u.page.isPage) return c.json({ status: 'no-page', gate: gateInfo, timings, ...dbg });
 
   const figs = u.page.figures.filter((f) => f.visualizable >= env.visualizableThreshold).sort((a, b) => b.visualizable - a.visualizable);
+  // the same page read twice can come back with a different page number or heading
+  // (blurry photos); map it onto the page we already know so it isn't rediscovered
+  const canon = canonicalPageKey(u.page, u.pageKey, sessionId);
+  if (canon !== u.pageKey) {
+    console.log(`[${sessionId.slice(0, 8)}] same-page   ${u.pageKey} → ${canon} (matched an earlier read of this page)`);
+    u.pageKey = canon;
+    markAnalysed(sessionId, stats.hash, canon);
+  }
   const seen = deliveredFor(sessionId).get(u.pageKey);
   logScores(sessionId, u.page, figs, !!seen?.length);
   if (seen?.length) return c.json({ status: 'already', pageKey: u.pageKey, knownDiscoveries: seen, gate: gateInfo, timings, ...dbg });
@@ -173,6 +181,39 @@ function logScores(sessionId: string, page: PageUnderstanding, passing: Figure[]
     const tpl = f.template && f.template !== 'none' ? ` template=${f.template}` : '';
     console.log(`${tag} ${String(pct).padStart(3)}% ${pass ? '≥' : '<'} ${thr}%  → ${decision}  ${f.id} "${f.title}" (${f.concept}${tpl}) — ${f.why}`.slice(0, 400));
   }
+}
+
+const words = (s: string) => new Set(s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length > 1));
+function similarity(a: string, b: string) {
+  const A = words(a), B = words(b);
+  if (!A.size || !B.size) return 0;
+  let n = 0;
+  for (const w of A) if (B.has(w)) n++;
+  return n / (A.size + B.size - n);
+}
+/** a figure id taken from a printed label ("fig-figure-15-20"), not a made-up one */
+const labelled = (id: string) => /^fig-.*\d/.test(id) && !/^fig-[a-z]$/.test(id);
+
+/**
+ * Finds an earlier read of the same page (this session first, then everyone's, so
+ * the cache is shared) and returns its page key. Same printed figure label with a
+ * compatible page (numbers within ±5, one unreadable, or similar headings); or,
+ * without labels, a near-identical heading and the same figure concept.
+ */
+export function canonicalPageKey(page: PageUnderstanding, pageKey: string, sessionId: string): string {
+  const fp = page.fingerprint;
+  const compatible = (d: Discovery) =>
+    (fp.pageNumber === null || d.pageNumber === null || Math.abs(fp.pageNumber - d.pageNumber) <= 5) && (fp.pageNumber !== null && d.pageNumber !== null ? true : similarity(fp.heading, d.heading) >= 0.3 || !fp.heading || !d.heading);
+  const all = recentDiscoveries(800);
+  const ordered = [...all.filter((d) => d.sessionId === sessionId), ...all.filter((d) => d.sessionId !== sessionId)];
+  for (const d of ordered) {
+    if (d.pageKey === pageKey) return pageKey;
+    for (const f of page.figures) {
+      if (labelled(f.id) && f.id === d.figureId && (compatible(d) || similarity(fp.heading, d.heading) >= 0.5)) return d.pageKey;
+      if (!labelled(f.id) && f.concept === d.concept && fp.heading && similarity(fp.heading, d.heading) >= 0.7) return d.pageKey;
+    }
+  }
+  return pageKey;
 }
 
 /** what the generated module receives as ctx */

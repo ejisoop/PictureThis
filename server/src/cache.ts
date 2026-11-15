@@ -47,6 +47,10 @@ export function discoveryPhoto(id: string): Buffer | null {
   const r = db.query('SELECT photo FROM discovery WHERE id = ?').get(id) as { photo: Uint8Array } | null;
   return r ? Buffer.from(r.photo) : null;
 }
+export function recentDiscoveries(limit = 500): Discovery[] {
+  return (db.query('SELECT record FROM discovery ORDER BY created DESC LIMIT ?').all(limit) as { record: string }[]).map((r) => JSON.parse(r.record));
+}
+
 export function discoveriesForSession(session: string): Discovery[] {
   return (db.query('SELECT record FROM discovery WHERE session = ? ORDER BY created DESC').all(session) as { record: string }[]).map((r) => JSON.parse(r.record));
 }
