@@ -12,7 +12,7 @@ import { chimeDataUrl } from './chime';
 export interface LpSession {
   capabilities: { [k: string]: unknown } | null;
   camera: {
-    takePhoto(o: { size?: 'low' | 'medium' | 'high' | 'max'; compress?: 'none' | 'low' | 'medium' | 'high'; sound?: boolean; timeoutMs?: number; mode?: 'photo' | 'text'; transferMethod?: 'auto' | 'direct' | 'ble' }): Promise<{ photoUrl: string; mimeType: string; size: number; requestId: string }>;
+    takePhoto(o: { size?: 'low' | 'medium' | 'high' | 'max'; compress?: 'none' | 'low' | 'medium' | 'high'; sound?: boolean; timeoutMs?: number; mode?: 'photo' | 'text'; transferMethod?: 'auto' | 'direct' | 'ble'; aeExposureDivisor?: number; isoCap?: number }): Promise<{ photoUrl: string; mimeType: string; size: number; requestId: string }>;
   };
   input: {
     onButtonPress(h: (d: { buttonId: string; pressType: 'short' | 'long' }) => void): () => void;
@@ -160,9 +160,16 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
    * pages, relayed through the phone. Try the fast path again after a while.
    */
   const DELIVERY = {
-    auto: { size: 'medium', compress: 'medium' },
+    auto: { size: 'max', compress: 'low' },
     text: { size: 'medium', compress: 'high', mode: 'text', transferMethod: 'ble' },
   } as const;
+  /**
+   * White pages blow out under auto-exposure. aeExposureDivisor lets the glasses
+   * meter as usual, then shortens the metered exposure by this factor (scan
+   * mode), so the paper stays below clipping and ink/figure edges keep detail.
+   * 1 = plain auto-exposure; raise it if pages still look washed out.
+   */
+  const AE_EXPOSURE_DIVISOR = 1.6;
   let delivery: keyof typeof DELIVERY = 'auto';
   let deliveryOkCount = 0;
   let captureCount = 0;
@@ -203,7 +210,7 @@ export async function livingPagesBackground(session: LpSession, cfg: BackgroundC
       const t0 = Date.now();
       // resolves after the photo has been uploaded; we only ever forward the URL
       // 45 s: without Wi-Fi the glasses relay the photo over BLE, which is slow
-      const photo = await session.camera.takePhoto({ ...DELIVERY[delivery], sound: false, timeoutMs: 45000 });
+      const photo = await session.camera.takePhoto({ ...DELIVERY[delivery], aeExposureDivisor: AE_EXPOSURE_DIVISOR, sound: false, timeoutMs: 45000 });
       trace.timings.capture = Date.now() - t0;
       captureMs.push(trace.timings.capture);
       if (captureMs.length > 20) captureMs.shift();
