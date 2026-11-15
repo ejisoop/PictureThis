@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+*.sqlite
+*.sqlite-*
+server/data/
+evals/results/
+reference/living-pages-mentra-source.tar.gz

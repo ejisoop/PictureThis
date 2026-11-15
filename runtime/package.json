@@ -1,0 +1,10 @@
+{
+  "name": "@lp/runtime",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "exports": { ".": "./src/index.ts", "./host": "./src/host/index.ts", "./bundle": "./dist/bundle.ts" },
+  "scripts": { "build": "bun run build.ts" },
+  "dependencies": { "three": "0.187.0", "gsap": "^3.15.1", "@fontsource/caveat": "^5.3.0", "@fontsource/eb-garamond": "^5.3.0" },
+  "devDependencies": { "@types/three": "0.187.0" }
+}

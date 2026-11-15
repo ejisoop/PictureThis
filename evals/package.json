@@ -1,0 +1,1 @@
+{ "name": "@lp/evals", "private": true, "type": "module", "dependencies": { "sharp": "^0.34.0", "@lp/runtime": "workspace:*" } }

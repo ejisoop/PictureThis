@@ -1,0 +1,16 @@
+{
+  "name": "@lp/harness",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "bun --hot serve.ts" },
+  "dependencies": {
+    "@lp/runtime": "workspace:*",
+    "@mentra/miniapp": "3.4.0-beta.1237",
+    "@fontsource/caveat": "^5.3.0",
+    "@fontsource/eb-garamond": "^5.3.0",
+    "gsap": "^3.15.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": { "@types/react": "^19.0.0", "@types/react-dom": "^19.0.0", "@types/bun": "latest" }
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/@mentra/miniapp-cli/schema/miniapp.schema.json",
+  "packageName": "com.mentra.livingpages",
+  "version": "1.0.0",
+  "name": "PictureThis",
+  "description": "Your textbook figures come alive: Mentra Live notices a figure on the page you are reading, chimes, and your phone turns it into an interactive 3D model.",
+  "icon": "icon.png",
+  "type": "standard",
+  "sdkVersion": "0.3.0",
+  "minHostVersion": "1.42.0",
+  "entry": {
+    "background": "background/index.js",
+    "ui": "ui/index.html"
+  },
+  "permissions": [
+    {
+      "type": "CAMERA",
+      "required": true,
+      "description": "Looks at the textbook page you are reading to find figures that can be brought to life."
+    }
+  ],
+  "hardwareRequirements": [
+    {
+      "type": "CAMERA",
+      "level": "REQUIRED",
+      "description": "Photographs the page"
+    },
+    {
+      "type": "SPEAKER",
+      "level": "OPTIONAL",
+      "description": "Chime when a figure is found"
+    },
+    {
+      "type": "BUTTON",
+      "level": "OPTIONAL",
+      "description": "Tap to look now, hold to pause"
+    }
+  ]
+}

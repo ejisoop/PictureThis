@@ -1,0 +1,12 @@
+{
+  "name": "living-pages",
+  "private": true,
+  "type": "module",
+  "workspaces": ["runtime", "server", "evals", "miniapp", "harness"],
+  "scripts": {
+    "build:runtime": "bun run --cwd runtime build",
+    "dev:server": "bun run --cwd server dev",
+    "dev:harness": "bun run --cwd harness dev",
+    "typecheck": "bun x tsc -p runtime && bun x tsc -p server && bun x tsc -p harness"
+  }
+}
